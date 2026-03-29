@@ -1,0 +1,23 @@
+# UI
+streamlit>=1.32.0
+
+# NLP
+nltk>=3.8.1
+spacy>=3.7.0
+
+# Transformers & ML
+transformers>=4.39.0
+torch>=2.2.0
+sentence-transformers>=2.6.0
+
+# Vector DB
+faiss-cpu>=1.8.0
+
+# PDF handling
+PyMuPDF>=1.24.0
+
+# Data & Utils
+numpy>=1.26.0
+pandas>=2.2.0
+scikit-learn>=1.4.0
+python-dotenv>=1.0.0
