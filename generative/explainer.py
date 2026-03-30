@@ -1,14 +1,14 @@
 # generative/explainer.py
 """
-Ollama (Mistral) powered Concept Explainer
+Concept Explainer — Groq API (llama-3.2-3b-preview)
 Gives deep, structured concept explanations grounded in the student's notes.
 """
-import os, sys, requests
+import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ── Ollama config ─────────────────────────────────────────────
-OLLAMA_URL   = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "mistral"
+# ── Groq config ───────────────────────────────────────────────
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL   = "llama-3.2-3b-preview"
 
 _notes_sentences = []
 
@@ -19,27 +19,28 @@ def set_notes_context(sentences: list):
 
 
 def _call_ollama(system_prompt: str, user_message: str, max_tokens: int = 1000) -> str | None:
-    """Call local Ollama model. Returns text or None."""
-    payload = {
-        "model"   : OLLAMA_MODEL,
-        "stream"  : False,
-        "options" : {"num_predict": max_tokens, "temperature": 0.3},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_message},
-        ],
-    }
+    """
+    Calls Groq API — drop-in replacement for Ollama.
+    Function name kept as _call_ollama so nothing else changes.
+    """
+    if not GROQ_API_KEY:
+        print("[EXPLAINER] ❌ No GROQ_API_KEY found. Add it to Streamlit secrets.")
+        return None
     try:
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=90)
-        if resp.status_code == 200:
-            return resp.json()["message"]["content"].strip()
-        print(f"[EXPLAINER] Ollama error {resp.status_code}")
-        return None
-    except requests.exceptions.ConnectionError:
-        print("[EXPLAINER] ❌ Ollama not running. Start with: ollama serve")
-        return None
+        from groq import Groq
+        client = Groq(api_key=GROQ_API_KEY)
+        resp   = client.chat.completions.create(
+            model       = GROQ_MODEL,
+            max_tokens  = max_tokens,
+            temperature = 0.3,
+            messages    = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_message},
+            ],
+        )
+        return resp.choices[0].message.content.strip()
     except Exception as e:
-        print(f"[EXPLAINER] Failed: {e}")
+        print(f"[EXPLAINER] Groq call failed: {e}")
         return None
 
 
@@ -131,7 +132,7 @@ def explain_concept(concept: str, style: str = "simple") -> str:
     for s in relevant[:3]:
         lines.append(f"- {s}")
     lines.append("")
-    lines.append("> 💡 *Ollama is not running. Start it with `ollama serve` for AI explanations.*")
+    lines.append("> 💡 *Groq API key not found. Add GROQ_API_KEY to Streamlit secrets.*")
     return "\n".join(lines)
 
 
