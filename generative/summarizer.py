@@ -1,9 +1,8 @@
 # generative/summarizer.py
 """
-Smart Summarizer — Groq API (llama-3.2-3b-preview)
-Generates structured summaries in 3 styles: concise, detailed, bullets.
+Ollama (llama3.2:3b) powered Summarizer — structured output
 """
-import os, sys, math
+import os, sys, math, requests
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import nltk
@@ -13,34 +12,33 @@ nltk.download("punkt",     quiet=True)
 nltk.download("punkt_tab", quiet=True)
 nltk.download("stopwords", quiet=True)
 
-# ── Groq config ───────────────────────────────────────────────
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL   = "llama-3.2-3b-preview"
+# ── Ollama config ─────────────────────────────────────────────
+OLLAMA_URL   = "http://localhost:11434/api/chat"
+OLLAMA_MODEL = "llama3.2:3b"
 
 
 def _call_ollama(system_prompt: str, user_message: str, max_tokens: int = 1500) -> str | None:
-    """
-    Calls Groq API — drop-in replacement for Ollama.
-    Function name kept as _call_ollama so nothing else changes.
-    """
-    if not GROQ_API_KEY:
-        print("[SUMMARIZER] ❌ No GROQ_API_KEY found. Add it to Streamlit secrets.")
-        return None
+    """Call local Ollama model. Returns text or None."""
+    payload = {
+        "model"   : OLLAMA_MODEL,
+        "stream"  : False,
+        "options" : {"num_predict": max_tokens, "temperature": 0.3},
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_message},
+        ],
+    }
     try:
-        from groq import Groq
-        client = Groq(api_key=GROQ_API_KEY)
-        resp   = client.chat.completions.create(
-            model       = GROQ_MODEL,
-            max_tokens  = max_tokens,
-            temperature = 0.3,
-            messages    = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_message},
-            ],
-        )
-        return resp.choices[0].message.content.strip()
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
+        if resp.status_code == 200:
+            return resp.json()["message"]["content"].strip()
+        print(f"[SUMMARIZER] Ollama error {resp.status_code}")
+        return None
+    except requests.exceptions.ConnectionError:
+        print("[SUMMARIZER] ❌ Ollama not running. Start with: ollama serve")
+        return None
     except Exception as e:
-        print(f"[SUMMARIZER] Groq call failed: {e}")
+        print(f"[SUMMARIZER] Failed: {e}")
         return None
 
 
@@ -151,7 +149,7 @@ Notes to summarize:
 
 
 def _extractive_fallback(text: str, style: str) -> str:
-    """Used when Groq API is unavailable."""
+    """Used when Ollama is unavailable."""
     sentences = sent_tokenize(text)
     sentences = [s.strip() for s in sentences if len(s.split()) >= 5]
     if not sentences:
@@ -171,7 +169,7 @@ def _extractive_fallback(text: str, style: str) -> str:
     bullets = "\n".join(f"- {s}" for _, s in top)
     return (
         f"## 📌 Key Points\n\n{bullets}\n\n"
-        f"> 💡 **Note:** Groq API key not found. Add GROQ_API_KEY to Streamlit secrets."
+        f"> 💡 **Note:** Ollama is not running. Start it with `ollama serve` for AI-powered summaries."
     )
 
 
