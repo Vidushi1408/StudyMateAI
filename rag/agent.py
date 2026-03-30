@@ -1,48 +1,43 @@
 # rag/agent.py
 """
-Multi-Tool Study Agent — Ollama (llama3.2:3b) powered
-Works synchronously — fully compatible with Streamlit.
-No API key needed. Runs locally via Ollama.
+Multi-Tool Study Agent — Groq API (llama-3.2-3b-preview)
+Drop-in replacement for Ollama. Fully compatible with Streamlit.
 """
-import os, sys, json, requests
+import os, sys, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from rag.retriever import retrieve_relevant_chunks, build_context_string, is_query_answerable
 from rag.indexer   import load_index
 
-# ── Ollama config ─────────────────────────────────────────────
-OLLAMA_URL   = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "llama3.2:3b"
+# ── Groq config ───────────────────────────────────────────────
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL   = "llama-3.2-3b-preview"
 
 
 def _call_ollama(system_prompt: str, user_message: str, max_tokens: int = 1000) -> str | None:
     """
-    Calls the local Ollama /api/chat endpoint.
-    Returns the assistant's reply text, or None on failure.
+    Calls Groq API — drop-in replacement for Ollama.
+    Function name kept as _call_ollama so nothing else in the codebase changes.
     """
-    payload = {
-        "model"   : OLLAMA_MODEL,
-        "stream"  : False,
-        "options" : {"num_predict": max_tokens, "temperature": 0.3},
-        "messages": [
-            {"role": "system",  "content": system_prompt},
-            {"role": "user",    "content": user_message},
-        ],
-    }
+    if not GROQ_API_KEY:
+        print("[AGENT] ❌ No GROQ_API_KEY found. Add it to Streamlit secrets.")
+        return None
     try:
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
-        if resp.status_code == 200:
-            return resp.json()["message"]["content"].strip()
-        print(f"[AGENT] Ollama error {resp.status_code}: {resp.text[:200]}")
-        return None
-    except requests.exceptions.ConnectionError:
-        print("[AGENT] ❌ Ollama not running. Start it with: ollama serve")
-        return None
+        from groq import Groq
+        client = Groq(api_key=GROQ_API_KEY)
+        resp   = client.chat.completions.create(
+            model       = GROQ_MODEL,
+            max_tokens  = max_tokens,
+            temperature = 0.3,
+            messages    = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_message},
+            ],
+        )
+        return resp.choices[0].message.content.strip()
     except Exception as e:
-        print(f"[AGENT] Ollama call failed: {e}")
+        print(f"[AGENT] Groq call failed: {e}")
         return None
 
-
-# ── Prompts ───────────────────────────────────────────────────
 
 ANSWER_SYSTEM = """You are an expert academic tutor. Give structured, precise answers using ONLY the context provided.
 
@@ -114,7 +109,6 @@ STRICT RULES:
 
 
 def _detect_format(question: str) -> str:
-    """Detect the best answer format from the question text."""
     q = question.lower()
     if any(w in q for w in ["what is", "define", "definition of", "meaning of"]):
         return "definition"
@@ -126,7 +120,6 @@ def _detect_format(question: str) -> str:
 
 
 def _search_notes(query: str, index, chunks: list, top_k: int = 5) -> str:
-    """Retrieve top-k relevant chunks from FAISS and return as formatted string."""
     results = retrieve_relevant_chunks(query, index, chunks, top_k=top_k)
     if not results:
         return "No relevant passages found."
@@ -134,7 +127,6 @@ def _search_notes(query: str, index, chunks: list, top_k: int = 5) -> str:
 
 
 def _generate_answer(question: str, context: str) -> str:
-    """Call Ollama to generate a structured answer from retrieved context."""
     fmt = _detect_format(question)
     user_msg = (
         f"Context from student's notes:\n\n{context}\n\n"
@@ -144,19 +136,10 @@ def _generate_answer(question: str, context: str) -> str:
         f"Generate a structured answer using ONLY the context above."
     )
     result = _call_ollama(ANSWER_SYSTEM, user_msg, max_tokens=1000)
-    return result or "**Could not generate answer.** Ollama may not be running — try `ollama serve`."
+    return result or "**Could not generate answer.** Check your GROQ_API_KEY in Streamlit secrets."
 
 
 def run_agent(question: str, index=None, chunks: list = None) -> dict:
-    """
-    Main agent function. Runs synchronously.
-    Steps:
-      1. Quick answerable check
-      2. Search notes (primary query)
-      3. If comparison question, search again with second concept
-      4. Generate structured answer from retrieved context
-    Returns dict: answer, tool_calls, answerable, question
-    """
     if index is None or chunks is None:
         index, chunks = load_index()
 
@@ -166,7 +149,6 @@ def run_agent(question: str, index=None, chunks: list = None) -> dict:
             "tool_calls": [], "answerable": False, "question": question,
         }
 
-    # ── Step 1: Quick relevance check ────────────────────────
     quick = retrieve_relevant_chunks(question, index, chunks, top_k=3)
     if not quick or not is_query_answerable(quick, threshold=0.18):
         return {
@@ -180,7 +162,6 @@ def run_agent(question: str, index=None, chunks: list = None) -> dict:
 
     tool_log = []
 
-    # ── Step 2: Primary search ────────────────────────────────
     print(f"[AGENT] 🔍 search_notes: '{question[:60]}'")
     context1 = _search_notes(question, index, chunks, top_k=5)
     tool_log.append({
@@ -189,11 +170,10 @@ def run_agent(question: str, index=None, chunks: list = None) -> dict:
         "result": context1[:200] + "...",
     })
 
-    all_context = context1
-
-    # ── Step 3: Second search for comparison questions ────────
+    all_context   = context1
     q_lower       = question.lower()
     is_comparison = any(w in q_lower for w in ["difference", "compare", "vs", "versus", "distinguish"])
+
     if is_comparison:
         words        = [w for w in question.split() if len(w) > 4]
         second_query = " ".join(words[-3:]) if len(words) > 3 else question
@@ -206,11 +186,10 @@ def run_agent(question: str, index=None, chunks: list = None) -> dict:
         })
         all_context = context1 + "\n\n" + context2
 
-    # ── Step 4: Generate answer ───────────────────────────────
-    print(f"[AGENT] ✍️ Generating answer via Ollama ({OLLAMA_MODEL})...")
+    print(f"[AGENT] ✍️ Generating answer via Groq ({GROQ_MODEL})...")
     final_answer = _generate_answer(question, all_context[:2500])
     tool_log.append({
-        "tool"  : "ask_ollama",
+        "tool"  : "ask_groq",
         "input" : {"question": question, "context_length": len(all_context)},
         "result": final_answer[:200] + "...",
     })
@@ -225,5 +204,4 @@ def run_agent(question: str, index=None, chunks: list = None) -> dict:
 
 
 def answer_question(question: str, index=None, chunks: list = None, **kwargs) -> dict:
-    """Compatibility wrapper — same interface used in app.py."""
     return run_agent(question, index, chunks)
