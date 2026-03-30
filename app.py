@@ -18,6 +18,46 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+import streamlit as st
+
+# ── Cached heavy loaders ──────────────────────────────────────────────────────
+
+@st.cache_resource(show_spinner=False)
+def _load_embed_model():
+    """Load SentenceTransformer once for the whole app session."""
+    from embeddings.sentence_embeddings import _get_model
+    return _get_model()
+
+
+@st.cache_resource(show_spinner=False)
+def _load_spacy():
+    """Load spaCy model once."""
+    import spacy
+    try:
+        return spacy.load("en_core_web_sm")
+    except OSError:
+        return None
+
+
+@st.cache_resource(show_spinner=False)
+def _load_nltk():
+    """Download NLTK data once per session."""
+    import nltk
+    for pkg in ["punkt", "stopwords", "wordnet", "averaged_perceptron_tagger"]:
+        try:
+            nltk.data.find(pkg)
+        except LookupError:
+            nltk.download(pkg, quiet=True)
+
+
+# Call these immediately so they warm up in the background
+# while the user is reading the landing page:
+_load_nltk()
+# Uncomment the next two lines if startup time is acceptable —
+# they pre-warm the models before the user clicks "Process":
+# _load_embed_model()
+# _load_spacy()
+
 
 # ── Image helper ─────────────────────────────────────────────────
 def _fetch_image(query: str):
@@ -439,7 +479,7 @@ if not st.session_state.processed:
             ("NLP",[p("rgba(99,102,241,0.1)","rgba(99,102,241,0.25)","#a5b4fc","NLTK"),p("rgba(99,102,241,0.1)","rgba(99,102,241,0.25)","#a5b4fc","spaCy"),p("rgba(99,102,241,0.1)","rgba(99,102,241,0.25)","#a5b4fc","Lemmatization"),p("rgba(99,102,241,0.1)","rgba(99,102,241,0.25)","#a5b4fc","POS Tagging")]),
             ("AI Models",[p("rgba(139,92,246,0.1)","rgba(139,92,246,0.25)","#c4b5fd","BERT NER"),p("rgba(139,92,246,0.1)","rgba(139,92,246,0.25)","#c4b5fd","SentenceTransformers"),p("rgba(139,92,246,0.1)","rgba(139,92,246,0.25)","#c4b5fd","ANN · CNN · LSTM")]),
             ("Vector Search",[p("rgba(34,197,94,0.08)","rgba(34,197,94,0.2)","#86efac","FAISS"),p("rgba(34,197,94,0.08)","rgba(34,197,94,0.2)","#86efac","Cosine Similarity"),p("rgba(34,197,94,0.08)","rgba(34,197,94,0.2)","#86efac","Semantic Chunking")]),
-            ("Framework",[p("rgba(251,146,60,0.08)","rgba(251,146,60,0.2)","#fdba74","Streamlit"),p("rgba(251,146,60,0.08)","rgba(251,146,60,0.2)","#fdba74","PyTorch"),p("rgba(251,146,60,0.08)","rgba(251,146,60,0.2)","#fdba74","Anthropic API")]),
+            ("Framework",[p("rgba(251,146,60,0.08)","rgba(251,146,60,0.2)","#fdba74","Streamlit"),p("rgba(251,146,60,0.08)","rgba(251,146,60,0.2)","#fdba74","PyTorch"),p("rgba(251,146,60,0.08)","rgba(251,146,60,0.2)","#fdba74","Ollama + LLaMA 3.2 3B")]),
         ]
         for grp_name,pills in groups:
             stack_html += (
